@@ -96,12 +96,12 @@ async def get_sales_data(
         # Calculate total sales BEFORE pagination
         total_sales_query = "SELECT SUM(amount) FROM (" + query + ")" # Get the sum before pagination
         await cursor.execute(total_sales_query, params)  # Await the execute call
-        total_sales = await cursor.fetchone()[0] or 0  # Await and use 0 if the result is None
+        total_sales = (await cursor.fetchone())[0] or 0
 
         # Get total count before pagination
         count_query = "SELECT COUNT(*) FROM (" + query + ")"
         await cursor.execute(count_query, params) # Await the execute call
-        total_items = await cursor.fetchone()[0]
+        total_items = (await cursor.fetchone())[0]
 
         # Paginate the data
         offset = (page - 1) * page_size
