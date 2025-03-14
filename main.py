@@ -10,7 +10,11 @@ import uvicorn
 
 app = FastAPI()
 
-port = int(os.getenv("PORT", 8000))  # Get Railway's assigned port
+
+# Force PORT to 8080 since Railway is setting it
+port = int(os.getenv("PORT", 8080))
+
+print(f"🚀 Running on port: {port}")  # Debugging output
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
