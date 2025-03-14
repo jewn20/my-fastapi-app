@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sales Report</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body class="container mt-5">
+    <h2 class="mb-4">Sales Report</h2>
+
+    <form id="reportForm" class="mb-4">
+        <div class="row">
+            <div class="col-md-4">
+                <label for="reportType" class="form-label">Report Type</label>
+                <select id="reportType" class="form-select">
+                    <option value="DAILY">Daily</option>
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="YEARLY">Yearly</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="dateEntry" class="form-label">Select Date</label>
+                <input type="date" id="dateEntry" class="form-control" value="{{ today }}">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button type="button" class="btn btn-primary" id="generateReport">Generate Report</button>
+            </div>
+        </div>
+    </form>
+
+    <div id="reportResults">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Cashier</th>
+                    <th>Product</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody id="reportTableBody">
+                <tr><td colspan="4" class="text-center">No data available</td></tr>
+            </tbody>
+        </table>
+        <div class="mt-3">
+            <strong>Total Sales: <span id="totalSales">0.00</span></strong>
+        </div>
+        <div id="paginationControls" class="mt-3">
+            <button class="btn btn-secondary" id="previousPage" enabled>Previous</button>
+            <span id="pageInfo">Page 1 of 1</span>
+            <button class="btn btn-secondary" id="nextPage" enabled>Next</button>
+        </div>
+    </div>
+
+    <script>
+        $(document).ready(function () {
+            let currentPage = 1;
+            const pageSize = 10; // You can make this configurable if needed
+            let totalPages = 1;
+
+            function generateReport(page) {
+                let reportType = $("#reportType").val();
+                let date = $("#dateEntry").val();
+
+                if (!date) {
+                    alert("Please select a date.");
+                    return;
+                }
+
+                $.ajax({
+                    url: `/sales/data?report_type=${reportType}&date=${date}&page=${page}&page_size=${pageSize}`,
+                    dataType: 'json',
+                    success: function (data) {
+                        let tableBody = $("#reportTableBody");
+                        tableBody.empty();
+
+                        if (data.sales.length > 0) {
+                            data.sales.forEach(sale => {
+                                tableBody.append(`
+                                    <tr>
+                                        <td>${sale.date}</td>
+                                        <td>${sale.cashier}</td>
+                                        <td>${sale.product}</td>
+                                        <td>${sale.amount}</td>
+                                    </tr>
+                                `);
+                            });
+                        } else {
+                            tableBody.append('<tr><td colspan="4" class="text-center">No data available</td></tr>');
+                        }
+
+                        $("#totalSales").text(data.total_sales.toFixed(2));
+                        currentPage = data.page;
+                        totalPages = data.total_pages;
+
+                        $("#pageInfo").text(`Page ${currentPage} of ${totalPages}`);
+
+                        $("#previousPage").prop("disabled", currentPage <= 1);
+                        $("#nextPage").prop("disabled", currentPage >= totalPages);
+                    },
+                    error: function (jqXHR, textStatus, errorThrown) {
+                        console.error("Error:", textStatus, errorThrown);
+                        alert("An error occurred while fetching the data.");
+                        $("#totalSales").text("Error");
+                    }
+                });
+            }
+
+            $("#generateReport").click(function () {
+                currentPage = 1; // Reset to first page on new report
+                generateReport(currentPage);
+            });
+
+            $("#previousPage").click(function () {
+                if (currentPage > 1) {
+                    generateReport(currentPage - 1);
+                }
+            });
+
+            $("#nextPage").click(function () {
+                if (currentPage < totalPages) {
+                    generateReport(currentPage + 1);
+                }
+            });
+
+            // Initial report generation (optional, you can remove this if you only want to generate on button click)
+            //generateReport(currentPage);
+        });
+    </script>
+</body>
+</html>

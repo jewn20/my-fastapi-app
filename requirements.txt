@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+sqlite3
+jinja2
+requests
