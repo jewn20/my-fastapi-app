@@ -7,6 +7,8 @@ from typing import Optional
 import os
 import uvicorn
 import aiosqlite  # Import aiosqlite
+import asyncio
+import logging
 
 app = FastAPI()
 
@@ -20,6 +22,20 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
+logging.basicConfig(level=logging.INFO)  # Configure logging
+
+async def test_db_connection():
+    try:
+        async with aiosqlite.connect("sales.db") as db: # Replace sales.db with your database
+            await db.execute("SELECT 1")  # Simple query to test the connection
+            await db.commit()
+        logging.info("Database connection test successful.")
+    except Exception as e:
+        logging.error(f"Database connection test failed: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    await test_db_connection() # Test the connection
 
 async def get_db():
     async with aiosqlite.connect("sales.db") as db: # Use aiosqlite.connect
