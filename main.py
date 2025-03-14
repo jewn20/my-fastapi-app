@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 import os
-import uvicorn
+#import uvicorn
 
 app = FastAPI()
 
@@ -12,7 +12,7 @@ async def read_root():
 async def health_check():
     return {"status": "ok"}
 
-port = int(os.getenv("PORT", 8080))
+#port = int(os.getenv("PORT", 8080))
 
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+#if __name__ == "__main__":
+ #   uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
