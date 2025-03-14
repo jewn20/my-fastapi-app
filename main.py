@@ -5,8 +5,15 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import os
+import uvicorn
 
 app = FastAPI()
+
+port = int(os.getenv("PORT", 8000))  # Get Railway's assigned port
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
 
 # Set up templates and static files
 BASE_DIR = Path(__file__).resolve().parent
