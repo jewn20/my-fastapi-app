@@ -1,2 +1,3 @@
 fastapi
-uvicorn==0.27.0  # Downgrade Uvicorn
+uvicorn==0.27.0
+jinja2
