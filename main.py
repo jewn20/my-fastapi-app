@@ -1,6 +1,5 @@
-from fastapi import FastAPI, Request, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
@@ -29,49 +28,48 @@ async def get_db():
 # On Startup - Test DB Connection
 @app.on_event("startup")
 async def startup_event():
-    async with aiosqlite.connect("sales.db") as db:
-        await db.execute("SELECT 1")
-        await db.commit()
+    try:
+        async with aiosqlite.connect("sales.db") as db:
+            await db.execute("SELECT 1")
+            await db.commit()
         logging.info("Database connection test successful.")
+    except Exception as e:
+        logging.error(f"Database connection test failed: {e}")
 
 # Sync Sales Data
 @app.post("/sync-sales")
-async def sync_sales(request: Request, user: str = Depends(authenticate)):
+async def sync_sales(request: Request):
     data = await request.json()
-    async with aiosqlite.connect("sales.db") as db:
-        for sale in data["sales"]:
-            await db.execute(
-                """
-                INSERT INTO sales (id, date, cashier, product, amount, synced)
-                VALUES (?, ?, ?, ?, ?, 1)
-                ON CONFLICT(id) DO UPDATE SET date=?, cashier=?, product=?, amount=?, synced=1
-                """,
-                (sale["id"], sale["date"], sale["cashier"], sale["product"], sale["amount"],
-                 sale["date"], sale["cashier"], sale["product"], sale["amount"])
-            )
-        await db.commit()
-        logging.info(f"Synced {len(data['sales'])} sales.")
-    return {"message": "Sales synced successfully"}
+    try:
+        async with aiosqlite.connect("sales.db") as db:
+            for sale in data["sales"]:
+                await db.execute(
+                    """
+                    INSERT INTO sales (id, date, cashier, product, amount, synced)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                    ON CONFLICT(id) DO UPDATE SET date=?, cashier=?, product=?, amount=?, synced=1
+                    """,
+                    (sale["id"], sale["date"], sale["cashier"], sale["product"], sale["amount"],
+                     sale["date"], sale["cashier"], sale["product"], sale["amount"])
+                )
+            await db.commit()
+            logging.info(f"Synced {len(data['sales'])} sales.")
+        return {"message": "Sales synced successfully"}
+    except Exception as e:
+        logging.error(f"Sync sales failed: {e}")
+        raise HTTPException(status_code=500, detail="Sync sales failed")
 
-# Home Page with Authentication (Forces Login Every Time)
+# Home Page
 @app.get("/", response_class=HTMLResponse)
-async def daily_sales_page(request: Request, user: str = Depends(authenticate)):
-    response = templates.TemplateResponse("daily_sales.html", {
+async def daily_sales_page(request: Request):
+    return templates.TemplateResponse("daily_sales.html", {
         "request": request,
         "today": datetime.now().strftime("%Y-%m-%d")
     })
-    
-    # Force authentication every reload by disabling caching
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    return response
 
 # Get Sales Data (With Pagination)
 @app.get("/data")
-async def get_sales_data(
-    report_type: str, date: str, page: int = 1, page_size: int = 12,
-    db: aiosqlite.Connection = Depends(get_db), user: str = Depends(authenticate)
-):
+async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: int = 12):
     valid_report_types = {"DAILY": "%Y-%m-%d", "MONTHLY": "%Y-%m", "YEARLY": "%Y"}
     if report_type not in valid_report_types:
         raise HTTPException(status_code=400, detail="Invalid report type")
@@ -89,17 +87,21 @@ async def get_sales_data(
     params = (valid_report_types[report_type], date)
     offset = (page - 1) * page_size
 
-    async with aiosqlite.connect("sales.db") as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(f"""
-            WITH sales_filtered AS (
-                {query}
-            )
-            SELECT *, (SELECT SUM(amount) FROM sales_filtered) AS total_sales,
-                    (SELECT COUNT(*) FROM sales_filtered) AS total_items
-            FROM sales_filtered LIMIT ? OFFSET ?
-        """, params + (page_size, offset)) as cursor:
-            sales = await cursor.fetchall()
+    try:
+        async with aiosqlite.connect("sales.db") as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(f"""
+                WITH sales_filtered AS (
+                    {query}
+                )
+                SELECT *, (SELECT SUM(amount) FROM sales_filtered) AS total_sales,
+                        (SELECT COUNT(*) FROM sales_filtered) AS total_items
+                FROM sales_filtered LIMIT ? OFFSET ?
+            """, params + (page_size, offset)) as cursor:
+                sales = await cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Get sales data failed: {e}")
+        raise HTTPException(status_code=500, detail="Get sales data failed")
 
     if not sales:
         return {"sales": [], "total_sales": 0, "total_items": 0, "total_pages": 0}
