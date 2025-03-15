@@ -3,11 +3,13 @@ import bcrypt
 import asyncio
 
 async def add_admin():
-    db = await aiosqlite.connect("sales.db")
-    hashed_pw = bcrypt.hashpw("@Rebele20".encode(), bcrypt.gensalt()).decode()
-    await db.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", ("jewn", hashed_pw, "admin"))
-    await db.commit()
-    await db.close()
-    print("Admin user added!")
+    try:
+        async with aiosqlite.connect("sales.db") as db:
+            hashed_pw = bcrypt.hashpw("@Rebele20".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            await db.execute("INSERT INTO users (username, hashed_password, role) VALUES (?, ?, ?)", ("jewn", hashed_pw, "admin"))
+            await db.commit()
+            print("Admin user added!")
+    except Exception as e:
+        print(f"Error adding admin user: {e}")
 
 asyncio.run(add_admin())
