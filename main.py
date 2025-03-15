@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
@@ -10,14 +12,30 @@ import logging
 
 app = FastAPI()
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
 # Set up templates and static files
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
-logging.basicConfig(level=logging.INFO)
-port = int(os.getenv("PORT", 8080))
-print(f"🚀 Running on port: {port}")
+# Authentication
+SECURITY = HTTPBasic()
+USERNAME = "admin" #This is a fixed username
+PASSWORD = os.getenv("@ComelecElectio2025") #This is the password
+
+# Verify Credentials
+def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY)):
+    correct_username = credentials.username == USERNAME
+    correct_password = credentials.password == PASSWORD
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 async def get_db():
     async with aiosqlite.connect("sales.db") as db:
@@ -32,7 +50,7 @@ async def startup_event():
         logging.info("Database connection test successful.")
 
 @app.post("/sync-sales")
-async def sync_sales(request: Request):
+async def sync_sales(request: Request, user: str = Depends(authenticate)):
     data = await request.json()
     async with aiosqlite.connect("sales.db") as db:
         for sale in data["sales"]:
@@ -49,22 +67,22 @@ async def sync_sales(request: Request):
         logging.info(f"Synced {len(data['sales'])} sales.")
     return {"message": "Sales synced successfully"}
 
-@app.get("/")
-async def daily_sales_page(request: Request):
+@app.get("/", response_class=HTMLResponse)
+async def daily_sales_page(request: Request, user: str = Depends(authenticate)):
     return templates.TemplateResponse("daily_sales.html", {"request": request, "today": datetime.now().strftime("%Y-%m-%d")})
 
 @app.get("/data")
-async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: int = 12, db: aiosqlite.Connection = Depends(get_db)):
+async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: int = 12,
+                        db: aiosqlite.Connection = Depends(get_db), user: str = Depends(authenticate)):
     valid_report_types = {"DAILY": "%Y-%m-%d", "MONTHLY": "%Y-%m", "YEARLY": "%Y"}
     if report_type not in valid_report_types:
         raise HTTPException(status_code=400, detail="Invalid report type")
 
     try:
-        # Use the correct length of the date
         if report_type == "MONTHLY":
-            date = date[:7]  # Keep only YYYY-MM
+            date = date[:7]
         elif report_type == "YEARLY":
-            date = date[:4]  # Keep only YYYY
+            date = date[:4]
         datetime.strptime(date, valid_report_types[report_type])
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
@@ -73,15 +91,18 @@ async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: 
     params = (valid_report_types[report_type], date)
     offset = (page - 1) * page_size
 
-    async with db.execute(f"""
-        WITH sales_filtered AS (
-            {query}
-        )
-        SELECT *, (SELECT SUM(amount) FROM sales_filtered) AS total_sales,
-                 (SELECT COUNT(*) FROM sales_filtered) AS total_items
-        FROM sales_filtered LIMIT ? OFFSET ?
-    """, params + (page_size, offset)) as cursor:
-        sales = await cursor.fetchall()
+    async with aiosqlite.connect("sales.db") as db:
+        db.row_factory = aiosqlite.Row
+
+        async with db.execute(f"""
+            WITH sales_filtered AS (
+                {query}
+            )
+            SELECT *, (SELECT SUM(amount) FROM sales_filtered) AS total_sales,
+                    (SELECT COUNT(*) FROM sales_filtered) AS total_items
+            FROM sales_filtered LIMIT ? OFFSET ?
+        """, params + (page_size, offset)) as cursor:
+            sales = await cursor.fetchall()
 
     if not sales:
         return {"sales": [], "total_sales": 0, "total_items": 0, "total_pages": 0}
@@ -98,5 +119,6 @@ async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: 
         "page_size": page_size
     }
 
+port = int(os.getenv("PORT", 8080))
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
