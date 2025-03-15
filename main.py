@@ -29,7 +29,7 @@ async def startup_event():
     async with aiosqlite.connect("sales.db") as db:
         await db.execute("SELECT 1")
         await db.commit()
-        logging.info("Database connection successful.")
+        logging.info("Database connection test successful.")
 
 @app.post("/sync-sales")
 async def sync_sales(request: Request):
@@ -60,6 +60,11 @@ async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: 
         raise HTTPException(status_code=400, detail="Invalid report type")
 
     try:
+        # Use the correct length of the date
+        if report_type == "MONTHLY":
+            date = date[:7]  # Keep only YYYY-MM
+        elif report_type == "YEARLY":
+            date = date[:4]  # Keep only YYYY
         datetime.strptime(date, valid_report_types[report_type])
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
