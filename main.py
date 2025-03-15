@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -22,8 +22,8 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Authentication
 SECURITY = HTTPBasic()
-USERNAME = "admin" #This is a fixed username
-PASSWORD = os.getenv("PASSWORD") #This is the password
+USERNAME = "admin"  # Fixed username
+PASSWORD = os.getenv("PASSWORD", "password123")  # Get password from env or default value
 
 # Verify Credentials
 def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY)):
@@ -32,16 +32,18 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY)):
     if not (correct_username and correct_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
 
+# Database Dependency
 async def get_db():
     async with aiosqlite.connect("sales.db") as db:
         db.row_factory = aiosqlite.Row
         yield db
 
+# On Startup - Test DB Connection
 @app.on_event("startup")
 async def startup_event():
     async with aiosqlite.connect("sales.db") as db:
@@ -49,6 +51,7 @@ async def startup_event():
         await db.commit()
         logging.info("Database connection test successful.")
 
+# Sync Sales Data
 @app.post("/sync-sales")
 async def sync_sales(request: Request, user: str = Depends(authenticate)):
     data = await request.json()
@@ -67,13 +70,25 @@ async def sync_sales(request: Request, user: str = Depends(authenticate)):
         logging.info(f"Synced {len(data['sales'])} sales.")
     return {"message": "Sales synced successfully"}
 
+# Home Page with Authentication (Forces Login Every Time)
 @app.get("/", response_class=HTMLResponse)
 async def daily_sales_page(request: Request, user: str = Depends(authenticate)):
-    return templates.TemplateResponse("daily_sales.html", {"request": request, "today": datetime.now().strftime("%Y-%m-%d")})
+    response = templates.TemplateResponse("daily_sales.html", {
+        "request": request,
+        "today": datetime.now().strftime("%Y-%m-%d")
+    })
+    
+    # Force authentication every reload by disabling caching
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
+# Get Sales Data (With Pagination)
 @app.get("/data")
-async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: int = 12,
-                        db: aiosqlite.Connection = Depends(get_db), user: str = Depends(authenticate)):
+async def get_sales_data(
+    report_type: str, date: str, page: int = 1, page_size: int = 12,
+    db: aiosqlite.Connection = Depends(get_db), user: str = Depends(authenticate)
+):
     valid_report_types = {"DAILY": "%Y-%m-%d", "MONTHLY": "%Y-%m", "YEARLY": "%Y"}
     if report_type not in valid_report_types:
         raise HTTPException(status_code=400, detail="Invalid report type")
@@ -93,7 +108,6 @@ async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: 
 
     async with aiosqlite.connect("sales.db") as db:
         db.row_factory = aiosqlite.Row
-
         async with db.execute(f"""
             WITH sales_filtered AS (
                 {query}
@@ -119,6 +133,7 @@ async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: 
         "page_size": page_size
     }
 
+# Run Server
 port = int(os.getenv("PORT", 8080))
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
