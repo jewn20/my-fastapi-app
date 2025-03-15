@@ -49,11 +49,11 @@ async def sync_sales(request: Request):
         logging.info(f"Synced {len(data['sales'])} sales.")
     return {"message": "Sales synced successfully"}
 
-@app.get("/sales/daily")
+@app.get("/")
 async def daily_sales_page(request: Request):
     return templates.TemplateResponse("daily_sales.html", {"request": request, "today": datetime.now().strftime("%Y-%m-%d")})
 
-@app.get("/sales/data")
+@app.get("/data")
 async def get_sales_data(report_type: str, date: str, page: int = 1, page_size: int = 12, db: aiosqlite.Connection = Depends(get_db)):
     valid_report_types = {"DAILY": "%Y-%m-%d", "MONTHLY": "%Y-%m", "YEARLY": "%Y"}
     if report_type not in valid_report_types:
