@@ -8,7 +8,6 @@ from pathlib import Path
 import os
 import uvicorn
 import aiosqlite
-import bcrypt
 import logging
 
 app = FastAPI()
@@ -23,33 +22,14 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 # Authentication
 SECURITY = HTTPBasic()
+USERNAME = "admin"  # Fixed username
+PASSWORD = os.getenv("PASSWORD", "@Rebele20")  # Get password from env or default value
 
-# Database Dependency
-async def get_db():
-    async with aiosqlite.connect("sales.db") as db:
-        db.row_factory = aiosqlite.Row
-        yield db
-
-# Create users table if not exists
-@app.on_event("startup")
-async def startup_event():
-    async with aiosqlite.connect("sales.db") as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
-            )
-        """)
-        await db.commit()
-        logging.info("Database initialized.")
-
-# Verify Credentials from Database
-async def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY), db: aiosqlite.Connection = Depends(get_db)):
-    async with db.execute("SELECT password FROM users WHERE username = ?", (credentials.username,)) as cursor:
-        user = await cursor.fetchone()
-    
-    if not user or not bcrypt.checkpw(credentials.password.encode(), user[0].encode()):
+# Verify Credentials
+def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY)):
+    correct_username = credentials.username == USERNAME
+    correct_password = credentials.password == PASSWORD
+    if not (correct_username and correct_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -57,16 +37,19 @@ async def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY), db
         )
     return credentials.username
 
-# Register a new user (for admin use)
-@app.post("/register")
-async def register_user(username: str, password: str, db: aiosqlite.Connection = Depends(get_db)):
-    hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    try:
-        await db.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
+# Database Dependency
+async def get_db():
+    async with aiosqlite.connect("sales.db") as db:
+        db.row_factory = aiosqlite.Row
+        yield db
+
+# On Startup - Test DB Connection
+@app.on_event("startup")
+async def startup_event():
+    async with aiosqlite.connect("sales.db") as db:
+        await db.execute("SELECT 1")
         await db.commit()
-        return {"message": "User registered successfully"}
-    except aiosqlite.IntegrityError:
-        raise HTTPException(status_code=400, detail="Username already exists")
+        logging.info("Database connection test successful.")
 
 # Sync Sales Data
 @app.post("/sync-sales")
@@ -87,7 +70,7 @@ async def sync_sales(request: Request, user: str = Depends(authenticate)):
         logging.info(f"Synced {len(data['sales'])} sales.")
     return {"message": "Sales synced successfully"}
 
-# Home Page with Authentication
+# Home Page with Authentication (Forces Login Every Time)
 @app.get("/", response_class=HTMLResponse)
 async def daily_sales_page(request: Request, user: str = Depends(authenticate)):
     response = templates.TemplateResponse("daily_sales.html", {
