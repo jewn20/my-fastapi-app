@@ -20,23 +20,6 @@ BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
-# Authentication
-SECURITY = HTTPBasic()
-USERNAME = "admin"  # Fixed username
-PASSWORD = os.getenv("PASSWORD", "@Rebele20")  # Get password from env or default value
-
-# Verify Credentials
-def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY)):
-    correct_username = credentials.username == USERNAME
-    correct_password = credentials.password == PASSWORD
-    if not (correct_username and correct_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
-
 # Database Dependency
 async def get_db():
     async with aiosqlite.connect("sales.db") as db:
