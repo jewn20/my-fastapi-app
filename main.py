@@ -1,15 +1,20 @@
 from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 from pathlib import Path
-import aiosqlite
-import bcrypt
 import os
 import uvicorn
+import aiosqlite
+import bcrypt
+import logging
 
 app = FastAPI()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 
 # Set up templates and static files
 BASE_DIR = Path(__file__).resolve().parent
@@ -19,33 +24,53 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 # Authentication
 SECURITY = HTTPBasic()
 
+# Database Dependency
 async def get_db():
     async with aiosqlite.connect("sales.db") as db:
         db.row_factory = aiosqlite.Row
         yield db
 
-async def verify_user(credentials: HTTPBasicCredentials = Depends(SECURITY), db=Depends(get_db)):
-    async with db.execute("SELECT username, password_hash, role FROM users WHERE username = ?", (credentials.username,)) as cursor:
-        user = await cursor.fetchone()
-        if not user or not bcrypt.checkpw(credentials.password.encode(), user["password_hash"].encode()):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid username or password",
-                headers={"WWW-Authenticate": "Basic"},
-            )
-    return {"username": user["username"], "role": user["role"]}
-
+# Create users table if not exists
 @app.on_event("startup")
 async def startup_event():
     async with aiosqlite.connect("sales.db") as db:
-        await db.execute("PRAGMA foreign_keys = ON;")
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            )
+        """)
         await db.commit()
+        logging.info("Database initialized.")
 
-@app.post("/sync-sales")
-async def sync_sales(request: Request, user: dict = Depends(verify_user)):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admin users can sync sales.")
+# Verify Credentials from Database
+async def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY), db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT password FROM users WHERE username = ?", (credentials.username,)) as cursor:
+        user = await cursor.fetchone()
     
+    if not user or not bcrypt.checkpw(credentials.password.encode(), user[0].encode()):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+# Register a new user (for admin use)
+@app.post("/register")
+async def register_user(username: str, password: str, db: aiosqlite.Connection = Depends(get_db)):
+    hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    try:
+        await db.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, hashed_password))
+        await db.commit()
+        return {"message": "User registered successfully"}
+    except aiosqlite.IntegrityError:
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+# Sync Sales Data
+@app.post("/sync-sales")
+async def sync_sales(request: Request, user: str = Depends(authenticate)):
     data = await request.json()
     async with aiosqlite.connect("sales.db") as db:
         for sale in data["sales"]:
@@ -59,22 +84,73 @@ async def sync_sales(request: Request, user: dict = Depends(verify_user)):
                  sale["date"], sale["cashier"], sale["product"], sale["amount"])
             )
         await db.commit()
+        logging.info(f"Synced {len(data['sales'])} sales.")
     return {"message": "Sales synced successfully"}
 
-@app.get("/")
-async def daily_sales_page(request: Request, user: dict = Depends(verify_user)):
-    return templates.TemplateResponse("daily_sales.html", {"request": request, "today": datetime.now().strftime("%Y-%m-%d"), "user": user})
+# Home Page with Authentication
+@app.get("/", response_class=HTMLResponse)
+async def daily_sales_page(request: Request, user: str = Depends(authenticate)):
+    response = templates.TemplateResponse("daily_sales.html", {
+        "request": request,
+        "today": datetime.now().strftime("%Y-%m-%d")
+    })
+    
+    # Force authentication every reload by disabling caching
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
-@app.post("/add-user")
-async def add_user(username: str, password: str, role: str, db=Depends(get_db), user: dict = Depends(verify_user)):
-    if user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admin users can add users.")
+# Get Sales Data (With Pagination)
+@app.get("/data")
+async def get_sales_data(
+    report_type: str, date: str, page: int = 1, page_size: int = 12,
+    db: aiosqlite.Connection = Depends(get_db), user: str = Depends(authenticate)
+):
+    valid_report_types = {"DAILY": "%Y-%m-%d", "MONTHLY": "%Y-%m", "YEARLY": "%Y"}
+    if report_type not in valid_report_types:
+        raise HTTPException(status_code=400, detail="Invalid report type")
 
-    hashed_pw = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     try:
-        async with db.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", (username, hashed_pw, role)):
-            await db.commit()
-    except aiosqlite.IntegrityError:
-        raise HTTPException(status_code=400, detail="Username already exists")
+        if report_type == "MONTHLY":
+            date = date[:7]
+        elif report_type == "YEARLY":
+            date = date[:4]
+        datetime.strptime(date, valid_report_types[report_type])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format")
 
-    return {"message": "User added successfully"}
+    query = "SELECT date, cashier, product, amount FROM sales WHERE strftime(?, date) = ?"
+    params = (valid_report_types[report_type], date)
+    offset = (page - 1) * page_size
+
+    async with aiosqlite.connect("sales.db") as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(f"""
+            WITH sales_filtered AS (
+                {query}
+            )
+            SELECT *, (SELECT SUM(amount) FROM sales_filtered) AS total_sales,
+                    (SELECT COUNT(*) FROM sales_filtered) AS total_items
+            FROM sales_filtered LIMIT ? OFFSET ?
+        """, params + (page_size, offset)) as cursor:
+            sales = await cursor.fetchall()
+
+    if not sales:
+        return {"sales": [], "total_sales": 0, "total_items": 0, "total_pages": 0}
+
+    total_sales, total_items = sales[0]["total_sales"], sales[0]["total_items"]
+    return {
+        "report_type": report_type,
+        "date": date,
+        "sales": [dict(row) for row in sales],
+        "total_sales": total_sales,
+        "total_items": total_items,
+        "total_pages": (total_items + page_size - 1) // page_size,
+        "page": page,
+        "page_size": page_size
+    }
+
+# Run Server
+port = int(os.getenv("PORT", 8080))
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
