@@ -70,7 +70,7 @@
                 }
 
                 $.ajax({
-                    url: '/data?report_type=${reportType}&date=${date}&page=${page}&page_size=${pageSize}'
+                    url: `/data?report_type=${reportType}&date=${date}&page=${page}&page_size=${pageSize}`,
                     dataType: 'json',
                     success: function (data) {
                         let tableBody = $("#reportTableBody");
@@ -101,7 +101,7 @@
                         $("#nextPage").prop("disabled", currentPage >= totalPages);
                     },
                     error: function (jqXHR, textStatus, errorThrown) {
-                        console.error("Error:", textStatus, errorThrown);
+                        console.error("AJAX error:", textStatus, errorThrown);
                         alert("An error occurred while fetching the data.");
                         $("#totalSales").text("Error");
                     }
