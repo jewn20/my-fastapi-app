@@ -23,7 +23,7 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 # Authentication
 SECURITY = HTTPBasic()
 USERNAME = "admin"  # Fixed username
-PASSWORD = os.getenv("PASSWORD", "password123")  # Get password from env or default value
+PASSWORD = os.getenv("PASSWORD", "@Rebele20")  # Get password from env or default value
 
 # Verify Credentials
 def authenticate(credentials: HTTPBasicCredentials = Depends(SECURITY)):
