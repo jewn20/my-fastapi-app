@@ -70,7 +70,7 @@
                 }
 
                 $.ajax({
-                    url: `/data?report_type=${reportType}&date=${date}&page=${page}&page_size=${pageSize}`,
+                    url: '/data?report_type=${reportType}&date=${date}&page=${page}&page_size=${pageSize}'
                     dataType: 'json',
                     success: function (data) {
                         let tableBody = $("#reportTableBody");
