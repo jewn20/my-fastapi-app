@@ -18,29 +18,27 @@ async def get_db():
     db.row_factory = aiosqlite.Row
     return db
 
+
+# Function to initialize the sales table if it doesn't exist
 async def init_sales_table():
-    async with aiosqlite.connect("sales.db") as db:
-        # Check if the 'sales' table exists
-        async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sales'") as cursor:
-            table_exists = await cursor.fetchone()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sales (
+                id INTEGER PRIMARY KEY,
+                date TEXT,
+                cashier TEXT,
+                product TEXT,
+                amount REAL,
+                synced INTEGER DEFAULT 0
+            )
+        """)
+        await db.commit()
 
-        # If the table does not exist, create it
-        if not table_exists:
-            await db.execute("""
-                CREATE TABLE sales (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT NOT NULL,
-                    cashier TEXT NOT NULL,
-                    product TEXT NOT NULL,
-                    amount REAL NOT NULL,
-                    synced INTEGER DEFAULT 0
-                );
-            """)
-            await db.commit()
-
+# Run this function at startup
 @app.on_event("startup")
 async def startup_event():
     await init_sales_table()
+
 
 
 @app.post("/sync_sales")
