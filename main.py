@@ -59,12 +59,12 @@ async def sync_sales(request: Request):
 
     return {"message": "Sales synced successfully"}
 
-@app.get("/sales/daily")
+@app.get("/")
 async def daily_sales_page(request: Request):
     today = datetime.now().strftime("%Y-%m-%d")  # Get current date in YYYY-MM-DD format
     return templates.TemplateResponse("daily_sales.html", {"request": request, "today": today})
 
-@app.get("/sales/data")
+@app.get("/data")
 async def get_sales_data(
     report_type: str,
     date: str,
