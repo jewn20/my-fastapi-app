@@ -1,66 +1,72 @@
-from fastapi import FastAPI, Request, Form, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 import aiosqlite
-import os
-from datetime import datetime
-from pathlib import Path
-import bcrypt
 import logging
-from typing import Optional
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+from datetime import datetime
 
 app = FastAPI()
-# Set up templates and static files
-BASE_DIR = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=BASE_DIR / "templates")
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-# Hash password
-def hash_password(password: str) -> str:
-    salt = bcrypt.gensalt()
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed_password.decode('utf-8')
+DB_PATH = "sales.db"
 
-# Verify Password
-def verify_password(password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
+# Logging setup
+logging.basicConfig(level=logging.INFO)
 
-# Get the database
+
 async def get_db():
-    async with aiosqlite.connect("sales.db") as db:
-        db.row_factory = aiosqlite.Row
-        yield db
+    db = await aiosqlite.connect(DB_PATH)
+    db.row_factory = aiosqlite.Row
+    return db
 
-# Home Page
-@app.get("/", response_class=HTMLResponse)
-async def daily_sales_page(request: Request):
-    return templates.TemplateResponse("daily_sales.html", {"request": request, "today": datetime.now().strftime("%Y-%m-%d")})
 
-# Login page
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+@app.get("/")
+async def sales_report_page(request: Request):
+    today = datetime.today().strftime("%Y-%m-%d")  # Format for HTML input field
+    return templates.TemplateResponse("daily_sales.html", {"request": request, "today": today})
 
-# login
-@app.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    async with aiosqlite.connect("sales.db") as db:
-        async with db.execute("SELECT id, username, hashed_password FROM users WHERE username = ?", (username,)) as cursor:
-            user = await cursor.fetchone()
-        if user is None:
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid username or password"})
-        user_id, db_username, hashed_password = user[0], user[1], user[2]
-        if not verify_password(password, hashed_password):
-            return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid username or password"})
-    response = RedirectResponse("/", status_code=302) # after login redirect back to home.
-    response.set_cookie(key="user_id", value=str(user_id), httponly=True, secure=False)
-    return response
 
-# Main Function
-port = int(os.getenv("PORT", 8080))
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+@app.get("/data")
+async def get_sales_data(
+    request: Request, report_type: str, date: str, page: int = 1, page_size: int = 10
+):
+    try:
+        logging.info(f"Fetching {report_type} sales for date: {date}")
+
+        # Convert date to expected database format (MM/DD/YYYY)
+        try:
+            formatted_date = datetime.strptime(date, "%Y-%m-%d").strftime("%m/%d/%Y")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+
+            offset = (page - 1) * page_size
+
+            query = "SELECT date, cashier, product, amount FROM sales WHERE date = ? LIMIT ? OFFSET ?"
+            async with db.execute(query, (formatted_date, page_size, offset)) as cursor:
+                sales = await cursor.fetchall()
+
+            # Get total sales amount
+            total_query = "SELECT SUM(amount) FROM sales WHERE date = ?"
+            async with db.execute(total_query, (formatted_date,)) as total_cursor:
+                total_sales = await total_cursor.fetchone()
+                total_sales = total_sales[0] if total_sales[0] is not None else 0.00
+
+            # Get total count for pagination
+            count_query = "SELECT COUNT(*) FROM sales WHERE date = ?"
+            async with db.execute(count_query, (formatted_date,)) as count_cursor:
+                total_count = await count_cursor.fetchone()
+                total_records = total_count[0] if total_count[0] is not None else 0
+                total_pages = (total_records // page_size) + (1 if total_records % page_size else 0)
+
+        return {
+            "sales": [{"date": row["date"], "cashier": row["cashier"], "product": row["product"], "amount": row["amount"]} for row in sales],
+            "total_sales": total_sales,
+            "page": page,
+            "total_pages": total_pages,
+        }
+
+    except Exception as e:
+        logging.error(f"Error fetching sales data: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while fetching the data.")

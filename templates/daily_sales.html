@@ -48,26 +48,26 @@
             <strong>Total Sales: <span id="totalSales">0.00</span></strong>
         </div>
         <div id="paginationControls" class="mt-3">
-            <button class="btn btn-secondary" id="previousPage" enabled>Previous</button>
+            <button class="btn btn-secondary" id="previousPage" disabled>Previous</button>
             <span id="pageInfo">Page 1 of 1</span>
-            <button class="btn btn-secondary" id="nextPage" enabled>Next</button>
+            <button class="btn btn-secondary" id="nextPage" disabled>Next</button>
         </div>
     </div>
 
     <script>
         $(document).ready(function () {
             let currentPage = 1;
-            const pageSize = 10; // You can make this configurable if needed
+            const pageSize = 10;
             let totalPages = 1;
 
             function generateReport(page) {
                 let reportType = $("#reportType").val();
                 let date = $("#dateEntry").val();
-
                 if (!date) {
                     alert("Please select a date.");
                     return;
                 }
+                let formattedDate = new Date(date).toLocaleDateString("en-US");
 
                 $.ajax({
                     url: `/data?report_type=${reportType}&date=${date}&page=${page}&page_size=${pageSize}`,
@@ -83,7 +83,7 @@
                                         <td>${sale.date}</td>
                                         <td>${sale.cashier}</td>
                                         <td>${sale.product}</td>
-                                        <td>${sale.amount}</td>
+                                        <td>${sale.amount.toFixed(2)}</td>
                                     </tr>
                                 `);
                             });
@@ -96,7 +96,6 @@
                         totalPages = data.total_pages;
 
                         $("#pageInfo").text(`Page ${currentPage} of ${totalPages}`);
-
                         $("#previousPage").prop("disabled", currentPage <= 1);
                         $("#nextPage").prop("disabled", currentPage >= totalPages);
                     },
@@ -109,7 +108,7 @@
             }
 
             $("#generateReport").click(function () {
-                currentPage = 1; // Reset to first page on new report
+                currentPage = 1;
                 generateReport(currentPage);
             });
 
@@ -124,9 +123,6 @@
                     generateReport(currentPage + 1);
                 }
             });
-
-            // Initial report generation (optional, you can remove this if you only want to generate on button click)
-            //generateReport(currentPage);
         });
     </script>
 </body>
