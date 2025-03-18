@@ -43,6 +43,18 @@ async def startup_event():
     await init_sales_table()
 
 
+@app.post("/sync_sales")
+async def sync_sales(sales: list[dict]):
+    async with aiosqlite.connect(DB_PATH) as db:
+        for sale in sales:
+            await db.execute(
+                "INSERT INTO sales (id, date, cashier, product, amount, synced) VALUES (?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT(id) DO UPDATE SET synced = 1",
+                (sale["id"], sale["date"], sale["cashier"], sale["product"], sale["amount"]),
+            )
+        await db.commit()
+    return {"status": "success", "synced_count": len(sales)}
+
 @app.get("/")
 async def sales_report_page(request: Request):
     today = datetime.today().strftime("%Y-%m-%d")  # Format for HTML input field
