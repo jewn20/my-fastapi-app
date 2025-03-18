@@ -59,19 +59,25 @@
             let currentPage = 1;
             const pageSize = 10;
             let totalPages = 1;
-
+    
             function formatDateForAPI(date, reportType) {
                 let formattedDate = new Date(date);
-
+                let month = ("0" + (formattedDate.getMonth() + 1)).slice(-2);
+                let day = ("0" + formattedDate.getDate()).slice(-2);
+                let year = formattedDate.getFullYear();
+    
+                if (reportType === "DAILY") {
+                    return `${month}/${day}/${year}`; // MM/DD/YYYY
+                } 
                 if (reportType === "MONTHLY") {
-                    return ("0" + (formattedDate.getMonth() + 1)).slice(-2) + "/" + formattedDate.getFullYear(); // MM/YYYY
+                    return `${month}/${year}`; // MM/YYYY
                 } 
                 if (reportType === "YEARLY") {
-                    return formattedDate.getFullYear(); // YYYY
+                    return `${year}`; // YYYY
                 }
-                return ("0" + (formattedDate.getMonth() + 1)).slice(-2) + "/" + ("0" + formattedDate.getDate()).slice(-2) + "/" + formattedDate.getFullYear(); // MM/DD/YYYY
+                return date;
             }
-
+    
             function generateReport(page) {
                 let reportType = $("#reportType").val();
                 let date = $("#dateEntry").val();
@@ -79,15 +85,16 @@
                     alert("Please select a date.");
                     return;
                 }
+    
                 let formattedDate = formatDateForAPI(date, reportType);
-
+    
                 $.ajax({
                     url: `/data?report_type=${reportType}&date=${formattedDate}&page=${page}&page_size=${pageSize}`,
                     dataType: 'json',
                     success: function (data) {
                         let tableBody = $("#reportTableBody");
                         tableBody.empty();
-
+    
                         if (data.sales.length > 0) {
                             data.sales.forEach(sale => {
                                 tableBody.append(`
@@ -102,11 +109,11 @@
                         } else {
                             tableBody.append('<tr><td colspan="4" class="text-center">No data available</td></tr>');
                         }
-
+    
                         $("#totalSales").text(data.total_sales.toFixed(2));
                         currentPage = data.page;
                         totalPages = data.total_pages;
-
+    
                         $("#pageInfo").text(`Page ${currentPage} of ${totalPages}`);
                         $("#previousPage").prop("disabled", currentPage <= 1);
                         $("#nextPage").prop("disabled", currentPage >= totalPages);
@@ -118,20 +125,23 @@
                     }
                 });
             }
-
+    
             $("#generateReport").click(function () {
                 currentPage = 1;
                 generateReport(currentPage);
             });
-
+    
             $("#previousPage").click(function () {
                 if (currentPage > 1) {
                     generateReport(currentPage - 1);
                 }
             });
-
+    
             $("#nextPage").click(function () {
                 if (currentPage < totalPages) {
                     generateReport(currentPage + 1);
                 }
             });
+        });
+    </script>
+    

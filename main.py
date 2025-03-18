@@ -54,17 +54,9 @@ async def sales_report_page(request: Request):
     return templates.TemplateResponse("daily_sales.html", {"request": request, "today": today})
 
 @app.get("/data")
-async def get_sales_data(
-    request: Request, report_type: str, date: str, page: int = 1, page_size: int = 10
-):
+async def get_sales_data(request: Request, report_type: str, date: str, page: int = 1, page_size: int = 10):
     try:
         logging.info(f"Fetching {report_type} sales for date: {date}")
-
-        # Convert date to MM/DD/YYYY for database filtering
-        try:
-            formatted_date = datetime.strptime(date, "%Y-%m-%d").strftime("%m/%d/%Y")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
 
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
@@ -72,7 +64,7 @@ async def get_sales_data(
 
             if report_type == "DAILY":
                 query = "SELECT date, cashier, product, amount FROM sales WHERE date = ? LIMIT ? OFFSET ?"
-                query_params = (formatted_date, page_size, offset)
+                query_params = (date, page_size, offset)
 
             elif report_type == "MONTHLY":
                 query = """
@@ -80,7 +72,7 @@ async def get_sales_data(
                     WHERE substr(date, 1, 2) || '/' || substr(date, 7, 4) = ? 
                     LIMIT ? OFFSET ?
                 """
-                query_params = (formatted_date[0:2] + '/' + formatted_date[6:10], page_size, offset)
+                query_params = (date, page_size, offset)
 
             elif report_type == "YEARLY":
                 query = """
@@ -88,7 +80,7 @@ async def get_sales_data(
                     WHERE substr(date, 7, 4) = ? 
                     LIMIT ? OFFSET ?
                 """
-                query_params = (formatted_date[6:10], page_size, offset)
+                query_params = (date, page_size, offset)
 
             else:
                 raise HTTPException(status_code=400, detail="Invalid report type")
@@ -96,12 +88,12 @@ async def get_sales_data(
             async with db.execute(query, query_params) as cursor:
                 sales = await cursor.fetchall()
 
-            # Calculate total sales
+            # Get total sales amount
             total_query = "SELECT SUM(amount) FROM sales WHERE date LIKE ?"
             total_filter = (
-                formatted_date if report_type == "DAILY"
-                else formatted_date[0:2] + "/%" + formatted_date[6:10] if report_type == "MONTHLY"
-                else "%/" + formatted_date[6:10] if report_type == "YEARLY"
+                date if report_type == "DAILY"
+                else date[0:2] + "/%" + date[3:7] if report_type == "MONTHLY"
+                else "%/" + date if report_type == "YEARLY"
                 else ""
             )
 
