@@ -60,6 +60,18 @@
             const pageSize = 10;
             let totalPages = 1;
 
+            function formatDateForAPI(date, reportType) {
+                let formattedDate = new Date(date);
+
+                if (reportType === "MONTHLY") {
+                    return ("0" + (formattedDate.getMonth() + 1)).slice(-2) + "/" + formattedDate.getFullYear(); // MM/YYYY
+                } 
+                if (reportType === "YEARLY") {
+                    return formattedDate.getFullYear(); // YYYY
+                }
+                return ("0" + (formattedDate.getMonth() + 1)).slice(-2) + "/" + ("0" + formattedDate.getDate()).slice(-2) + "/" + formattedDate.getFullYear(); // MM/DD/YYYY
+            }
+
             function generateReport(page) {
                 let reportType = $("#reportType").val();
                 let date = $("#dateEntry").val();
@@ -67,10 +79,10 @@
                     alert("Please select a date.");
                     return;
                 }
-                let formattedDate = new Date(date).toLocaleDateString("en-US");
+                let formattedDate = formatDateForAPI(date, reportType);
 
                 $.ajax({
-                    url: `/data?report_type=${reportType}&date=${date}&page=${page}&page_size=${pageSize}`,
+                    url: `/data?report_type=${reportType}&date=${formattedDate}&page=${page}&page_size=${pageSize}`,
                     dataType: 'json',
                     success: function (data) {
                         let tableBody = $("#reportTableBody");
@@ -123,7 +135,3 @@
                     generateReport(currentPage + 1);
                 }
             });
-        });
-    </script>
-</body>
-</html>

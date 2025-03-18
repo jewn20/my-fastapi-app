@@ -12,14 +12,12 @@ DB_PATH = "sales.db"
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 
-
 async def get_db():
     db = await aiosqlite.connect(DB_PATH)
     db.row_factory = aiosqlite.Row
     return db
 
-
-# Function to initialize the sales table if it doesn't exist
+# Initialize sales table if not exists
 async def init_sales_table():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -34,12 +32,9 @@ async def init_sales_table():
         """)
         await db.commit()
 
-# Run this function at startup
 @app.on_event("startup")
 async def startup_event():
     await init_sales_table()
-
-
 
 @app.post("/sync_sales")
 async def sync_sales(sales: list[dict]):
@@ -58,7 +53,6 @@ async def sales_report_page(request: Request):
     today = datetime.today().strftime("%Y-%m-%d")  # Format for HTML input field
     return templates.TemplateResponse("daily_sales.html", {"request": request, "today": today})
 
-
 @app.get("/data")
 async def get_sales_data(
     request: Request, report_type: str, date: str, page: int = 1, page_size: int = 10
@@ -66,7 +60,7 @@ async def get_sales_data(
     try:
         logging.info(f"Fetching {report_type} sales for date: {date}")
 
-        # Convert date to expected database format (MM/DD/YYYY)
+        # Convert date to MM/DD/YYYY for database filtering
         try:
             formatted_date = datetime.strptime(date, "%Y-%m-%d").strftime("%m/%d/%Y")
         except ValueError:
@@ -74,22 +68,50 @@ async def get_sales_data(
 
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
-
             offset = (page - 1) * page_size
 
-            query = "SELECT date, cashier, product, amount FROM sales WHERE date = ? LIMIT ? OFFSET ?"
-            async with db.execute(query, (formatted_date, page_size, offset)) as cursor:
+            if report_type == "DAILY":
+                query = "SELECT date, cashier, product, amount FROM sales WHERE date = ? LIMIT ? OFFSET ?"
+                query_params = (formatted_date, page_size, offset)
+
+            elif report_type == "MONTHLY":
+                query = """
+                    SELECT date, cashier, product, amount FROM sales 
+                    WHERE substr(date, 1, 2) || '/' || substr(date, 7, 4) = ? 
+                    LIMIT ? OFFSET ?
+                """
+                query_params = (formatted_date[0:2] + '/' + formatted_date[6:10], page_size, offset)
+
+            elif report_type == "YEARLY":
+                query = """
+                    SELECT date, cashier, product, amount FROM sales 
+                    WHERE substr(date, 7, 4) = ? 
+                    LIMIT ? OFFSET ?
+                """
+                query_params = (formatted_date[6:10], page_size, offset)
+
+            else:
+                raise HTTPException(status_code=400, detail="Invalid report type")
+
+            async with db.execute(query, query_params) as cursor:
                 sales = await cursor.fetchall()
 
-            # Get total sales amount
-            total_query = "SELECT SUM(amount) FROM sales WHERE date = ?"
-            async with db.execute(total_query, (formatted_date,)) as total_cursor:
+            # Calculate total sales
+            total_query = "SELECT SUM(amount) FROM sales WHERE date LIKE ?"
+            total_filter = (
+                formatted_date if report_type == "DAILY"
+                else formatted_date[0:2] + "/%" + formatted_date[6:10] if report_type == "MONTHLY"
+                else "%/" + formatted_date[6:10] if report_type == "YEARLY"
+                else ""
+            )
+
+            async with db.execute(total_query, (total_filter,)) as total_cursor:
                 total_sales = await total_cursor.fetchone()
                 total_sales = total_sales[0] if total_sales[0] is not None else 0.00
 
-            # Get total count for pagination
-            count_query = "SELECT COUNT(*) FROM sales WHERE date = ?"
-            async with db.execute(count_query, (formatted_date,)) as count_cursor:
+            # Pagination count
+            count_query = "SELECT COUNT(*) FROM sales WHERE date LIKE ?"
+            async with db.execute(count_query, (total_filter,)) as count_cursor:
                 total_count = await count_cursor.fetchone()
                 total_records = total_count[0] if total_count[0] is not None else 0
                 total_pages = (total_records // page_size) + (1 if total_records % page_size else 0)
